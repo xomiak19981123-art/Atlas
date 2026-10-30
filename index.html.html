@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Атлас мышц</title>
+<style>
+:root{--bg:#E8ECF1;--panel:#FFFFFF;--ink:#16202B;--muted:#5B6877;--line:#CBD3DD;--chip:#F2F5F8;--main:#D93B3B;--second:#E8A317}
+@media (prefers-color-scheme: dark){:root{--bg:#0F151C;--panel:#18212B;--ink:#E9EEF4;--muted:#9AA7B6;--line:#2B3846;--chip:#1F2A36;--main:#FF5C5C;--second:#F5B83D}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;overflow:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+h1{margin:0;padding:8px 14px 2px;font-size:17px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:6px 14px 8px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+button{font:inherit;color:var(--ink)}
+.chip{flex:none;border:1px solid var(--line);background:var(--chip);padding:8px 13px;border-radius:18px;font-size:14px;cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button:focus-visible{outline:2px solid var(--main);outline-offset:2px}
+#stage{position:relative;flex:1;min-height:0}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+.col{position:absolute;top:8px;display:flex;flex-direction:column;gap:6px}
+.col.l{left:10px;align-items:flex-start}.col.r{right:10px}
+.col button{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:6px 10px;font-size:12.5px;cursor:pointer}
+.col button[aria-pressed="false"]{opacity:.55}
+.legend{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px;margin-bottom:4px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+#load{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;background:var(--bg);font-size:14px;line-height:1.45}
+#load a{color:var(--main)}
+#load button{border:1px solid var(--ink);background:var(--panel);border-radius:10px;padding:9px 14px;cursor:pointer}
+#info{background:var(--panel);border-top:1px solid var(--line);padding:12px 14px;max-height:32vh;overflow-y:auto}
+#info h2{margin:0 0 4px;font-size:16px}
+#info p{margin:0 0 8px;font-size:14px;line-height:1.45;max-width:70ch}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{border:1px solid var(--line);background:var(--chip);border-radius:12px;padding:4px 10px;font-size:13px;cursor:pointer}
+.tag.m{border-color:var(--main)}.tag.s{border-color:var(--second)}
+.lbl{font-size:12px;color:var(--muted);margin:8px 0 4px}
+footer{font-size:10.5px;color:var(--muted);padding:5px 14px;background:var(--panel);line-height:1.35}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head>
+<body>
+<h1>Атлас мышц</h1>
+<div class="chips" id="chips" role="tablist" aria-label="Упражнения"></div>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div class="col l">
+    <div class="legend"><span><i style="background:var(--main)"></i>основные</span><span><i style="background:var(--second)"></i>помогающие</span></div>
+    <button data-t="sup" aria-pressed="true">Поверхностные</button>
+    <button data-t="deep" aria-pressed="true">Глубокие</button>
+    <button data-t="bone" aria-pressed="true">Кости</button>
+    <button data-t="iso" aria-pressed="true">Только работающие</button>
+  </div>
+  <div class="col r">
+    <button data-v="0">Спереди</button><button data-v="3.1416">Сзади</button><button data-v="1.5708">Сбоку</button>
+  </div>
+  <div id="load"><div id="loadmsg">Загрузка модели…</div>
+    <div id="fail" hidden>
+      <p>Не удалось скачать модель. Скачай файл <a href="https://github.com/Charleeh/ecorche/blob/main/model/ecorche.meshopt.glb" target="_blank" rel="noopener">ecorche.meshopt.glb</a> и выбери его здесь:</p>
+      <button id="pick">Выбрать файл</button><input id="file" type="file" accept=".glb" hidden>
+    </div>
+  </div>
+</div>
+<section id="info" aria-live="polite"></section>
+<footer>Модель: Écorché (github.com/Charleeh/ecorche), CC BY-SA 4.0. На основе BodyParts3D (© The Database Center for Life Science, CC BY 4.0) и Z-Anatomy (Gauthier Kervyn, CC BY-SA 4.0).</footer>
+
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
+
+/* ---------- Группы мышц: id, название, описание, правило по английскому названию меша ---------- */
+const GROUPS = [
+ ['calves','Голень и стопа','Икроножная и камбаловидная поднимают пятку (ходьба, бег, прыжок), передняя большеберцовая поднимает носок.',/foot|pedis|gastrocnemius|soleus|plantaris|tibialis|fibularis|peroneus|popliteus|hallucis|digitorum (longus|brevis)/],
+ ['cuff','Вращательная манжета','Четыре мышцы, которые удерживают плечевой сустав и вращают плечо. Их травмы частые у тех, кто жмёт и тянет без разминки.',/supraspinatus|infraspinatus|teres|subscapularis/],
+ ['biceps','Бицепс и плечевая','Сгибают руку в локте. Бицепс ещё поворачивает предплечье ладонью вверх.',/biceps brachii|brachialis|coracobrachialis/],
+ ['triceps','Трицепс','Разгибает руку в локте. Работает во всех жимах и отжиманиях.',/triceps brachii|anconeus/],
+ ['hams','Задняя поверхность бедра','Сгибает колено и вместе с ягодицами разгибает бедро.',/biceps femoris|semitendinosus|semimembranosus/],
+ ['quads','Квадрицепс','Разгибает колено, главный в подъёме из приседа и выпада.',/rectus femoris|vastus|quadriceps|sartorius|articularis genus/],
+ ['adductors','Приводящие мышцы бедра','Сводят бёдра и стабилизируют таз в приседе и выпаде.',/adductor|gracilis|pectineus/],
+ ['glutes','Ягодичные мышцы','Разгибают бедро: подъём из приседа, шаг, прыжок, мостик.',/gluteus|piriformis|obturator|gemellus|tensor fasciae|quadratus femoris/],
+ ['hipflex','Подвздошно-поясничная','Сгибает бедро: подъём ноги и корпуса. Лежит глубоко, видна только при отключении поверхностного слоя.',/psoas|iliacus|iliopsoas/],
+ ['pecs','Грудные мышцы','Сводят и опускают руку вперёд, работают во всех жимах.',/pectoralis/],
+ ['serratus','Зубчатая передняя','Тянет лопатку вперёд и прижимает к грудной клетке. Важна в жимах и отжиманиях.',/serratus anterior/],
+ ['delts','Дельтовидные мышцы','Поднимают руку вперёд, в стороны и назад.',/deltoid/],
+ ['traps','Трапеции и ромбовидные','Поднимают и сводят лопатки, держат верх спины.',/trapezius|rhomboid|levator scapulae/],
+ ['lats','Широчайшие мышцы спины','Тянут руку вниз и назад. Главные в подтягиваниях и тягах.',/latissimus/],
+ ['lowback','Разгибатели спины','Держат позвоночник прямым и разгибают корпус.',/erector|iliocostalis|longissimus|spinalis|multifidus|quadratus lumborum|rotatores|semispinalis|interspinales|thoracolumbar/],
+ ['abs','Прямая мышца живота','Сгибает корпус и стабилизирует его («кубики»).',/rectus abdominis|pyramidalis/],
+ ['obliques','Косые и поперечная мышцы живота','Наклоняют и поворачивают корпус, «корсет» вокруг талии.',/oblique|transvers\w* abdominis/],
+ ['forearms','Предплечья и кисть','Сгибают и разгибают кисть и пальцы, отвечают за хват.',/flexor|extensor|brachioradialis|pronator|supinator|palmaris|pollicis|digiti minimi|lumbrical|interosse|opponens|digitorum/],
+ ['neck','Мышцы шеи','Наклоняют и поворачивают голову.',/sternocleidomastoid|scalene|splenius|platysma|longus capitis|longus colli|hyoid|digastric/]
+];
+const G = Object.fromEntries(GROUPS.map(g=>[g[0],g]));
+G.other = ['other','Другая мышца','Мышца вне основных групп.',null];
+const classify = n => (GROUPS.find(g=>g[3].test(n.toLowerCase()))||G.other)[0];
+
+/* ---------- Упражнения ---------- */
+const EX = [
+ ['Приседания со штангой',['quads','glutes'],['adductors','hams','lowback','abs','calves'],'Базовое упражнение для ног. Колени идут по линии носков, спина прямая, таз уходит назад и вниз.'],
+ ['Жим лёжа',['pecs','triceps'],['delts','serratus'],'Основной жим для груди. Лопатки сведены, штанга опускается к нижней части груди.'],
+ ['Становая тяга',['glutes','hams','lowback'],['traps','lats','forearms','quads','adductors'],'Подъём веса с пола за счёт разгибания бёдер. Спина нейтральная, штанга близко к ногам.'],
+ ['Подтягивания',['lats','biceps'],['traps','cuff','forearms','abs'],'Вертикальная тяга. Тянем локти вниз к рёбрам, корпус остаётся напряжённым.'],
+ ['Отжимания',['pecs','triceps'],['delts','serratus','abs'],'Жим собственного веса. Тело в одну линию, локти под углом около 45° к корпусу.'],
+ ['Жим стоя',['delts','triceps'],['traps','serratus','abs','cuff'],'Жим над головой. Корпус напряжён, ягодицы сжаты, поясница не прогибается.'],
+ ['Подъём на бицепс',['biceps'],['forearms'],'Сгибание рук. Локти прижаты к корпусу, без раскачки, в низу руки выпрямляются полностью.'],
+ ['Тяга в наклоне',['lats','traps'],['biceps','lowback','hams','forearms','cuff'],'Горизонтальная тяга. Корпус почти параллелен полу, штанга идёт к низу живота.'],
+ ['Выпады',['quads','glutes'],['adductors','hams','calves','abs'],'Одностороннее упражнение для ног. Колено передней ноги над стопой.'],
+ ['Ягодичный мостик',['glutes'],['hams','abs','lowback','adductors'],'Разгибание бедра лёжа. Вверху ягодицы сжаты, поясница не переразгибается.'],
+ ['Скручивания',['abs'],['obliques','hipflex'],'Короткое сгибание корпуса лёжа. Двигаются грудная клетка и верх спины, поясница на полу.'],
+ ['Планка',['abs','obliques'],['delts','glutes','lowback','quads','serratus'],'Статическое удержание корпуса. Тело в одну линию от пяток до макушки.'],
+ ['Подъём на носки',['calves'],[],'Работа голени. Полная амплитуда, пауза в верхней точке.']
+].map(([n,m,s,d])=>({n,m,s,d}));
+
+/* ---------- Сцена ---------- */
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const stage = $('stage'), canvas = $('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30,1,.05,60);
+camera.position.set(0,1,3.6);
+scene.add(new THREE.HemisphereLight(0xffffff,0x667080,1.1));
+const k = new THREE.DirectionalLight(0xffffff,1.4); k.position.set(2,3,3); scene.add(k);
+const b = new THREE.DirectionalLight(0xffffff,.9); b.position.set(-2,2,-3); scene.add(b);
+const controls = new OrbitControls(camera,canvas);
+controls.enableDamping = true; controls.target.set(0,.95,0);
+new ResizeObserver(()=>{const w=stage.clientWidth,h=stage.clientHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}).observe(stage);
+renderer.setAnimationLoop(()=>{controls.update();renderer.render(scene,camera);});
+
+/* ---------- Состояние ---------- */
+const meshes = [], pickable = [];
+const on = {sup:true, deep:true, bone:true, iso:true};
+let current = EX[0], selected = null, loaded = false;
+
+function update(){
+  if(!loaded) return;
+  const main = css('--main'), sec = css('--second');
+  pickable.length = 0;
+  for(const m of meshes){
+    const d = m.userData, lay = d.info.layer;
+    m.visible = on[lay==='skeleton'?'bone':lay==='deep muscles'?'deep':'sup'];
+    if(d.bone){ if(m.visible) pickable.push(m); continue; }
+    const g = d.group, role = current.m.includes(g)?2:current.s.includes(g)?1:0;
+    let col = '#8E99A8', op = 1;
+    if(role===2) col = main; else if(role===1) col = sec;
+    else if(on.iso) op = .06;
+    if(g===selected && role===0){col='#C4CEDB'; op=1;}
+    const mat = m.material, t = op<1;
+    mat.color.set(col); mat.opacity = op; mat.depthWrite = !t;
+    if(mat.transparent!==t){mat.transparent=t; mat.needsUpdate=true;}
+    if(m.visible && !t) pickable.push(m);
+  }
+}
+
+/* ---------- Интерфейс ---------- */
+const chips = $('chips'), info = $('info');
+EX.forEach((e,i)=>{
+  const bt = document.createElement('button');
+  bt.className='chip'; bt.textContent=e.n; bt.setAttribute('role','tab');
+  bt.onclick = ()=>pickEx(i); chips.appendChild(bt);
+});
+const tags = (ids,c)=>ids.map(id=>`<button class="tag ${c}" data-m="${id}">${G[id][1]}</button>`).join('');
+function pickEx(i){
+  current = EX[i]; selected = null;
+  [...chips.children].forEach((c,k)=>{c.classList.toggle('on',k===i);c.setAttribute('aria-selected',k===i);});
+  info.innerHTML = `<h2>${current.n}</h2><p>${current.d}</p>
+   <div class="lbl">Основные мышцы</div><div class="tags">${tags(current.m,'m')}</div>
+   ${current.s.length?`<div class="lbl">Помогают</div><div class="tags">${tags(current.s,'s')}</div>`:''}
+   <div class="lbl">Нажми на мышцу на модели или в списке, чтобы узнать о ней.</div>`;
+  update();
+}
+function showMuscle(g, name){
+  selected = g;
+  const used = EX.map((e,i)=>[e,i]).filter(([e])=>e.m.includes(g)||e.s.includes(g));
+  info.innerHTML = `<h2>${G[g][1]}</h2><p>${G[g][2]}</p>
+   ${name?`<div class="lbl">Выбрано на модели: ${name}</div>`:''}
+   ${used.length?`<div class="lbl">Работает в упражнениях</div><div class="tags">${used.map(([e,i])=>`<button class="tag" data-e="${i}">${e.n}</button>`).join('')}</div>`:''}
+   <div class="lbl"><button class="tag" data-e="${EX.indexOf(current)}">← к упражнению «${current.n}»</button></div>`;
+  update();
+}
+function showBone(name){
+  selected = null;
+  info.innerHTML = `<h2>${name}</h2><p>Кость или хрящ скелета. Мышцы крепятся к костям сухожилиями и двигают их как рычаги.</p>
+   <div class="lbl"><button class="tag" data-e="${EX.indexOf(current)}">← к упражнению «${current.n}»</button></div>`;
+  update();
+}
+info.addEventListener('click',e=>{
+  const t = e.target.closest('button'); if(!t) return;
+  if(t.dataset.m) showMuscle(t.dataset.m); else if(t.dataset.e) pickEx(+t.dataset.e);
+});
+document.querySelectorAll('[data-t]').forEach(bt=>bt.onclick=()=>{
+  on[bt.dataset.t] = !on[bt.dataset.t]; bt.setAttribute('aria-pressed',on[bt.dataset.t]); update();
+});
+document.querySelectorAll('[data-v]').forEach(bt=>bt.onclick=()=>{
+  const t = controls.target, d = camera.position.distanceTo(t), a = +bt.dataset.v;
+  camera.position.set(t.x+Math.sin(a)*d, t.y+d*.05, t.z+Math.cos(a)*d); controls.update();
+});
+
+/* нажатие на мышцу (отличаем от вращения по смещению) */
+const ray = new THREE.Raycaster(), mv = new THREE.Vector2(); let down = null;
+canvas.addEventListener('pointerdown',e=>down={x:e.clientX,y:e.clientY});
+canvas.addEventListener('pointerup',e=>{
+  if(!down || Math.hypot(e.clientX-down.x,e.clientY-down.y)>6) return;
+  const r = canvas.getBoundingClientRect();
+  mv.set((e.clientX-r.left)/r.width*2-1, -(e.clientY-r.top)/r.height*2+1);
+  ray.setFromCamera(mv,camera);
+  const h = ray.intersectObjects(pickable,false)[0]; if(!h) return;
+  const d = h.object.userData;
+  d.bone ? showBone(d.info.name) : showMuscle(d.group, d.info.name);
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',update);
+
+/* ---------- Загрузка модели ---------- */
+const FILE = 'model/ecorche.meshopt.glb';
+const SOURCES = ['./ecorche.meshopt.glb',
+  'https://raw.githubusercontent.com/Charleeh/ecorche/main/'+FILE,
+  'https://github.com/Charleeh/ecorche/raw/main/'+FILE,
+  'https://charleeh.github.io/ecorche/'+FILE];
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+
+function setup(root){
+  scene.add(root); root.updateMatrixWorld(true);
+  root.traverse(o=>{
+    const u = o.userData; if(!u || !u.layer || !u.name) return;
+    const list = []; if(o.isMesh) list.push(o); else o.traverse(c=>{if(c.isMesh) list.push(c);});
+    for(const m of list){
+      if(m.userData.info) continue;
+      m.material = m.material.clone();
+      m.userData.info = u;
+      if(u.layer==='skeleton') m.userData.bone = true;
+      else { m.userData.group = classify(u.name); m.material.vertexColors = false; m.material.needsUpdate = true; }
+      meshes.push(m);
+    }
+  });
+  const box = new THREE.Box3().setFromObject(root), c = box.getCenter(new THREE.Vector3()), h = box.max.y-box.min.y;
+  controls.target.copy(c); camera.position.set(c.x, c.y+h*.05, c.z+h*2.1);
+  controls.minDistance = h*.25; controls.maxDistance = h*4; controls.update();
+  loaded = true; $('load').hidden = true; pickEx(0);
+  const unknown = meshes.filter(m=>m.userData.group==='other').map(m=>m.userData.info.name);
+  console.log('Мышцы без группы ('+unknown.length+'):', unknown);
+}
+async function tryLoad(i=0){
+  if(i>=SOURCES.length){ $('loadmsg').hidden = true; $('fail').hidden = false; return; }
+  loader.load(SOURCES[i], g=>setup(g.scene),
+    p=>{ if(p.total) $('loadmsg').textContent = 'Загрузка модели… '+Math.round(p.loaded/p.total*100)+'%'; },
+    ()=>tryLoad(i+1));
+}
+$('pick').onclick = ()=>$('file').click();
+$('file').onchange = async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  $('fail').hidden = true; $('loadmsg').hidden = false; $('loadmsg').textContent = 'Читаю файл…';
+  loader.parse(await f.arrayBuffer(),'',g=>setup(g.scene),()=>{$('loadmsg').hidden=true;$('fail').hidden=false;});
+};
+tryLoad();
+pickEx(0);
+</script>
+</body>
+</html>
